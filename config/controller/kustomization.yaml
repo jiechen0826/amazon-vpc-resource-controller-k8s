@@ -9,4 +9,4 @@ namePrefix: local-
 images:
 - name: controller
   newName: 718849929293.dkr.ecr.us-west-2.amazonaws.com/eks/vpc-resource-controller
-  newTag: v1.2.1-10-g60adc94
+  newTag: v1.2.1-11-g3c83f58

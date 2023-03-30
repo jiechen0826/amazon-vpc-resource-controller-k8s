@@ -27,6 +27,7 @@ spec:
           - --enable-leader-election=false
           - --metrics-addr=:8443
         image: controller:latest
+        imagePullPolicy: Always
         name: controller
         resources:
           limits:
