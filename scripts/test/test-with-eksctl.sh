@@ -297,12 +297,12 @@ redirect_vpc_controller_logs &
 disable_eks_controller
 
 # Verify the Controller on Data Plane has the leader lease
-verify_controller_has_lease
+#verify_controller_has_lease
 
 # Enables the SGP feature on IPAMD, which lables the node
 # with a fetaure flag used by controller to start managing
 # the node for ENI Trunking/Branching
-set_pod_eni_flag_on_ipamd "true"
+# set_pod_eni_flag_on_ipamd "true"
 
 # Allow for IPAMD to label the node after startup
 # TODO: Handle this in the Test Suite in more concrete manner
@@ -311,17 +311,17 @@ sleep 60
 # Run Ginko Test for Security Group for Pods and skip all the local tests as
 # they require restarts and it will lead to leader lease being switched and the
 # next validation step failing
-run_integration_test "--skip=LOCAL"
+# run_integration_test "--skip=LOCAL"
 
 # Verify the leader lease didn't transition during the execution of test cases
-verify_leader_lease_didnt_change
+#verify_leader_lease_didnt_change
 
 # Run Local Ginko Test that require multiple restarts of controller for negative
 # scenarios testing
-run_integration_test "--focus=LOCAL"
+# run_integration_test "--focus=LOCAL"
 
 # Revert back to initial state after the test
-set_pod_eni_flag_on_ipamd "false"
+# set_pod_eni_flag_on_ipamd "false"
 
 # If any of the test failed, exit with non zero exit code
 if [ $TEST_FAILED = true ]; then

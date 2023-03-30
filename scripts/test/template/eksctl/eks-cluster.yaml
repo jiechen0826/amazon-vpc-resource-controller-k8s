@@ -7,7 +7,8 @@ metadata:
 nodeGroups:
   - name: linux-instance
     instanceType: c5.large  # For SGP Tests, this must be a Nitro-based Instance
-    desiredCapacity: 3
+    desiredCapacity: 2
+    disableIMDSv1: true
     iam:
       instanceRoleName: INSTANCE_ROLE_NAME # Static IAM Role Name for easily adding IAM Policies after creation
       attachPolicyARNs:
@@ -16,6 +17,6 @@ nodeGroups:
         - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
   - name: windows-instance
     amiFamily: WindowsServer2019FullContainer
-    instanceType: c5.4xlarge # Larger instance type since the Pod density on Windows node is less
-    desiredCapacity: 3
-
+    instanceType: t3.xlarge # Larger instance type since the Pod density on Windows node is less
+    desiredCapacity: 2
+    disableIMDSv1: true

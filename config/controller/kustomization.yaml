@@ -8,5 +8,5 @@ namePrefix: local-
 # IPAM
 images:
 - name: controller
-  newName: controller
-  newTag: latest
+  newName: 718849929293.dkr.ecr.us-west-2.amazonaws.com/eks/vpc-resource-controller
+  newTag: v1.2.1-10-g60adc94
