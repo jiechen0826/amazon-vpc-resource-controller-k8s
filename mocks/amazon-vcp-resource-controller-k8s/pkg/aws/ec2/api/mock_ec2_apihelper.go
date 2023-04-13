@@ -62,6 +62,21 @@ func (mr *MockEC2APIHelperMockRecorder) AssignIPv4AddressesAndWaitTillReady(arg0
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AssignIPv4AddressesAndWaitTillReady", reflect.TypeOf((*MockEC2APIHelper)(nil).AssignIPv4AddressesAndWaitTillReady), arg0, arg1)
 }
 
+// AssignIPv4PrefixesAndWaitTillReady mocks base method.
+func (m *MockEC2APIHelper) AssignIPv4PrefixesAndWaitTillReady(arg0 string, arg1 int) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AssignIPv4PrefixesAndWaitTillReady", arg0, arg1)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AssignIPv4PrefixesAndWaitTillReady indicates an expected call of AssignIPv4PrefixesAndWaitTillReady.
+func (mr *MockEC2APIHelperMockRecorder) AssignIPv4PrefixesAndWaitTillReady(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AssignIPv4PrefixesAndWaitTillReady", reflect.TypeOf((*MockEC2APIHelper)(nil).AssignIPv4PrefixesAndWaitTillReady), arg0, arg1)
+}
+
 // AssociateBranchToTrunk mocks base method.
 func (m *MockEC2APIHelper) AssociateBranchToTrunk(arg0, arg1 *string, arg2 int) (*ec2.AssociateTrunkInterfaceOutput, error) {
 	m.ctrl.T.Helper()
@@ -93,33 +108,33 @@ func (mr *MockEC2APIHelperMockRecorder) AttachNetworkInterfaceToInstance(arg0, a
 }
 
 // CreateAndAttachNetworkInterface mocks base method.
-func (m *MockEC2APIHelper) CreateAndAttachNetworkInterface(arg0, arg1 *string, arg2 []string, arg3 []*ec2.Tag, arg4 *int64, arg5, arg6 *string, arg7 int) (*ec2.NetworkInterface, error) {
+func (m *MockEC2APIHelper) CreateAndAttachNetworkInterface(arg0, arg1 *string, arg2 []string, arg3 []*ec2.Tag, arg4 *int64, arg5, arg6 *string, arg7 int, arg8 int) (*ec2.NetworkInterface, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateAndAttachNetworkInterface", arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+	ret := m.ctrl.Call(m, "CreateAndAttachNetworkInterface", arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
 	ret0, _ := ret[0].(*ec2.NetworkInterface)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CreateAndAttachNetworkInterface indicates an expected call of CreateAndAttachNetworkInterface.
-func (mr *MockEC2APIHelperMockRecorder) CreateAndAttachNetworkInterface(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7 interface{}) *gomock.Call {
+func (mr *MockEC2APIHelperMockRecorder) CreateAndAttachNetworkInterface(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAndAttachNetworkInterface", reflect.TypeOf((*MockEC2APIHelper)(nil).CreateAndAttachNetworkInterface), arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAndAttachNetworkInterface", reflect.TypeOf((*MockEC2APIHelper)(nil).CreateAndAttachNetworkInterface), arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
 }
 
 // CreateNetworkInterface mocks base method.
-func (m *MockEC2APIHelper) CreateNetworkInterface(arg0, arg1 *string, arg2 []string, arg3 []*ec2.Tag, arg4 int, arg5 *string) (*ec2.NetworkInterface, error) {
+func (m *MockEC2APIHelper) CreateNetworkInterface(arg0, arg1 *string, arg2 []string, arg3 []*ec2.Tag, arg4 int, arg5 int, arg6 *string) (*ec2.NetworkInterface, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateNetworkInterface", arg0, arg1, arg2, arg3, arg4, arg5)
+	ret := m.ctrl.Call(m, "CreateNetworkInterface", arg0, arg1, arg2, arg3, arg4, arg5, arg6)
 	ret0, _ := ret[0].(*ec2.NetworkInterface)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CreateNetworkInterface indicates an expected call of CreateNetworkInterface.
-func (mr *MockEC2APIHelperMockRecorder) CreateNetworkInterface(arg0, arg1, arg2, arg3, arg4, arg5 interface{}) *gomock.Call {
+func (mr *MockEC2APIHelperMockRecorder) CreateNetworkInterface(arg0, arg1, arg2, arg3, arg4, arg5, arg6 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateNetworkInterface", reflect.TypeOf((*MockEC2APIHelper)(nil).CreateNetworkInterface), arg0, arg1, arg2, arg3, arg4, arg5)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateNetworkInterface", reflect.TypeOf((*MockEC2APIHelper)(nil).CreateNetworkInterface), arg0, arg1, arg2, arg3, arg4, arg5, arg6)
 }
 
 // DeleteNetworkInterface mocks base method.
@@ -280,6 +295,20 @@ func (m *MockEC2APIHelper) UnassignPrivateIpAddresses(arg0 string, arg1 []string
 func (mr *MockEC2APIHelperMockRecorder) UnassignPrivateIpAddresses(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnassignPrivateIpAddresses", reflect.TypeOf((*MockEC2APIHelper)(nil).UnassignPrivateIpAddresses), arg0, arg1)
+}
+
+// UnassignIPv4Prefixes mocks base method.
+func (m *MockEC2APIHelper) UnassignIPv4Prefixes(arg0 string, arg1 []string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UnassignPrivateIpAddresses", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UnassignIPv4Prefixes indicates an expected call of UnassignIPv4Prefixes.
+func (mr *MockEC2APIHelperMockRecorder) UnassignIPv4Prefixes(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnassignIPv4Prefixes", reflect.TypeOf((*MockEC2APIHelper)(nil).UnassignIPv4Prefixes), arg0, arg1)
 }
 
 // WaitForNetworkInterfaceStatusChange mocks base method.

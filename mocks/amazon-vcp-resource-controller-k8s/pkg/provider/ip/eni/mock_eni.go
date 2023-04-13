@@ -78,13 +78,44 @@ func (mr *MockENIManagerMockRecorder) DeleteIPV4Address(arg0, arg1, arg2 interfa
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteIPV4Address", reflect.TypeOf((*MockENIManager)(nil).DeleteIPV4Address), arg0, arg1, arg2)
 }
 
-// InitResources mocks base method.
-func (m *MockENIManager) InitResources(arg0 api.EC2APIHelper) ([]string, error) {
+// CreateIPV4Prefix mocks base method.
+func (m *MockENIManager) CreateIPV4Prefix(arg0 int, arg1 api.EC2APIHelper, arg2 logr.Logger) ([]string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "InitResources", arg0)
+	ret := m.ctrl.Call(m, "CreateIPV4Prefix", arg0, arg1, arg2)
 	ret0, _ := ret[0].([]string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
+}
+
+// CreateIPV4Prefix indicates an expected call of CreateIPV4Prefix.
+func (mr *MockENIManagerMockRecorder) CreateIPV4Prefix(arg0, arg1, arg2 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateIPV4Prefix", reflect.TypeOf((*MockENIManager)(nil).CreateIPV4Prefix), arg0, arg1, arg2)
+}
+
+// DeleteIPV4Prefix mocks base method.
+func (m *MockENIManager) DeleteIPV4Prefix(arg0 []string, arg1 api.EC2APIHelper, arg2 logr.Logger) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteIPV4Prefix", arg0, arg1, arg2)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteIPV4Prefix indicates an expected call of DeleteIPV4Prefix.
+func (mr *MockENIManagerMockRecorder) DeleteIPV4Prefix(arg0, arg1, arg2 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteIPV4Prefix", reflect.TypeOf((*MockENIManager)(nil).DeleteIPV4Prefix), arg0, arg1, arg2)
+}
+
+// InitResources mocks base method.
+func (m *MockENIManager) InitResources(arg0 api.EC2APIHelper) ([]string, []string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InitResources", arg0)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].([]string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // InitResources indicates an expected call of InitResources.

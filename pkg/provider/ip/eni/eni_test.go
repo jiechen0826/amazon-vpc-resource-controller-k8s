@@ -130,7 +130,7 @@ func TestEni_InitResources(t *testing.T) {
 	// Capacity is 4 and already present 1, so remaining capacity = 4-1=3
 	expectedENIDetails2 := createENIDetails(eniID2, 3)
 
-	allIPs, err := manager.InitResources(mockEc2APIHelper)
+	allIPs, _, err := manager.InitResources(mockEc2APIHelper)
 
 	assert.NoError(t, err)
 	// Assert all the IPs are returned
@@ -153,7 +153,7 @@ func TestEni_InitResources_Error(t *testing.T) {
 
 	mockEc2APIHelper.EXPECT().GetInstanceNetworkInterface(&instanceID).Return(nwInterfaces, mockError)
 
-	_, err := manager.InitResources(mockEc2APIHelper)
+	_, _, err := manager.InitResources(mockEc2APIHelper)
 
 	assert.Error(t, mockError, err)
 }
@@ -233,9 +233,9 @@ func TestEniManager_CreateIPV4Address_FromNewENI(t *testing.T) {
 
 	gomock.InOrder(
 		mockEc2APIHelper.EXPECT().CreateAndAttachNetworkInterface(&instanceID, &subnetID, instanceSG, nil, aws.Int64(3),
-			&ENIDescription, nil, 3).Return(networkInterface1, nil),
+			&ENIDescription, nil, 3, 0).Return(networkInterface1, nil),
 		mockEc2APIHelper.EXPECT().CreateAndAttachNetworkInterface(&instanceID, &subnetID, instanceSG, nil, aws.Int64(3),
-			&ENIDescription, nil, 1).Return(networkInterface2, nil),
+			&ENIDescription, nil, 1, 0).Return(networkInterface2, nil),
 	)
 
 	ips, err := manager.CreateIPV4Address(4, mockEc2APIHelper, log)
@@ -269,9 +269,9 @@ func TestEniManager_CreateIPV4Address_InBetweenENIFail(t *testing.T) {
 
 	gomock.InOrder(
 		mockEc2APIHelper.EXPECT().CreateAndAttachNetworkInterface(&instanceID, &subnetID, instanceSG, nil, aws.Int64(3),
-			&ENIDescription, nil, 3).Return(networkInterface1, nil),
+			&ENIDescription, nil, 3, 0).Return(networkInterface1, nil),
 		mockEc2APIHelper.EXPECT().CreateAndAttachNetworkInterface(&instanceID, &subnetID, instanceSG, nil, aws.Int64(3),
-			&ENIDescription, nil, 1).Return(nil, mockError),
+			&ENIDescription, nil, 1, 0).Return(nil, mockError),
 	)
 
 	ips, err := manager.CreateIPV4Address(4, mockEc2APIHelper, log)
