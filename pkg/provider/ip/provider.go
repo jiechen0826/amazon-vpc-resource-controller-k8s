@@ -22,9 +22,9 @@ import (
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/aws/vpc"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/condition"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/config"
+	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/internal/eni"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/pool"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/provider"
-	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/provider/ip/eni"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/worker"
 
 	"github.com/go-logr/logr"
@@ -44,7 +44,8 @@ type ipv4Provider struct {
 	lock sync.RWMutex // guards the following
 	// instanceResources stores the ENIManager and the resource pool per instance
 	instanceProviderAndPool map[string]ResourceProviderAndPool
-	conditions              condition.Conditions
+	// conditions is used to check which IP allocation mode is enabled
+	conditions condition.Conditions
 }
 
 // InstanceResource contains the instance's ENI manager and the resource pool
@@ -69,7 +70,7 @@ func (p *ipv4Provider) InitResource(instance ec2.EC2Instance) error {
 	nodeName := instance.Name()
 
 	eniManager := eni.NewENIManager(instance)
-	presentIPs, err := eniManager.InitResources(p.apiWrapper.EC2API)
+	presentIPs, _, err := eniManager.InitResources(p.apiWrapper.EC2API)
 	if err != nil {
 		return err
 	}
@@ -80,22 +81,32 @@ func (p *ipv4Provider) InitResource(instance ec2.EC2Instance) error {
 	}
 
 	podToResourceMap := map[string]string{}
-	usedIPSet := map[string]struct{}{}
+	usedResourceToGroupMap := map[string]string{}
 	for _, pod := range pods {
 		annotation, present := pod.Annotations[config.ResourceNameIPAddress]
 		if !present {
 			continue
 		}
-		podToResourceMap[string(pod.UID)] = annotation
-		usedIPSet[annotation] = struct{}{}
+		// Only mark pod as used if it's secondary IP
+		for _, candidateIP := range presentIPs {
+			if annotation == candidateIP {
+				podToResourceMap[string(pod.UID)] = annotation
+				usedResourceToGroupMap[annotation] = annotation
+			}
+		}
 	}
-
-	warmResources := difference(presentIPs, usedIPSet)
+	// Warm resources are the differences between all attached secondary IPs and IPs used by running pods
+	warmResourceGroups := map[string][]string{}
+	for _, ip := range presentIPs {
+		if _, found := usedResourceToGroupMap[ip]; !found {
+			warmResourceGroups[ip] = append(warmResourceGroups[ip], ip)
+		}
+	}
 
 	nodeCapacity := getCapacity(instance.Type(), instance.Os())
 	resourcePool := pool.NewResourcePool(p.log.WithName("ipv4 resource pool").
-		WithValues("node name", instance.Name()), p.config, podToResourceMap,
-		warmResources, instance.Name(), nodeCapacity)
+		WithValues("node name", instance.Name()), p.config, podToResourceMap, usedResourceToGroupMap,
+		warmResourceGroups, instance.Name(), nodeCapacity)
 
 	p.putInstanceProviderAndPool(nodeName, resourcePool, eniManager)
 
@@ -103,17 +114,19 @@ func (p *ipv4Provider) InitResource(instance ec2.EC2Instance) error {
 		"capacity", nodeCapacity, "node name", nodeName, "instance type",
 		instance.Type(), "instance ID", instance.InstanceID())
 
+	// If PD mode is enabled, need to drain the secondary IPv4 pool
 	if p.conditions.IsWindowsPrefixDelegationEnabled() {
-		// This means that we need to drain the secondary IPv4 pool.
 		job := resourcePool.SetToDraining()
-		p.SubmitAsyncJob(job)
-		p.log.Info("setting the ip provider pool to draining state")
-	}
-
-	// Reconcile pool after starting up and submit the async job
-	job := resourcePool.ReconcilePool()
-	if job.Operations != worker.OperationReconcileNotRequired {
-		p.SubmitAsyncJob(job)
+		if job.Operations != worker.OperationReconcileNotRequired {
+			p.SubmitAsyncJob(job)
+		}
+		p.log.Info("setting the secondary IP pool to draining state")
+	} else {
+		// Reconcile pool after starting up and submit the async job
+		job := resourcePool.ReconcilePool()
+		if job.Operations != worker.OperationReconcileNotRequired {
+			p.SubmitAsyncJob(job)
+		}
 	}
 
 	// Submit the async job to periodically process the delete queue
@@ -137,30 +150,23 @@ func (p *ipv4Provider) UpdateResourceCapacity(instance ec2.EC2Instance) error {
 	}
 
 	// If prefix delegation is enabled, then set the pool state to draining and do not update the capacity as that would be
-	// done by PD provider.
+	// done by prefix provider
 	if p.conditions.IsWindowsPrefixDelegationEnabled() {
-		p.log.Info("Prefix provider pool should be active")
 		job := resourceProviderAndPool.resourcePool.SetToDraining()
-		p.log.Info("drained the pool for IPv4 resource provider and skipped updating capacity due to ip prefix delegation is enabled")
+		p.log.Info("IPv4 prefix provider should be active")
 		p.SubmitAsyncJob(job)
 		return nil
 	}
 
-	// Do not update pool and capacity if IPAM is not enabled
-	if !p.conditions.IsWindowsIPAMEnabled() {
-		p.log.Info("Windows IPAM is disabled, skipping updating capacity")
+	// Reset resource config to default values
+	resourceConfig := config.LoadResourceConfig()
+	ipv4ResourceConfig, ok := resourceConfig[config.ResourceNameIPAddress]
+	if !ok {
+		p.log.Error(fmt.Errorf("failed to find resource configuration"), "resourceName", config.ResourceNameIPAddress)
 		return nil
 	}
 
-	// Set the pool state to active.
-	p.log.Info("IP provider pool is active")
-	resourceConfig := config.LoadResourceConfig()
-	resourceName := config.ResourceNameIPAddress
-	ipv4ResourceConfig, ok := resourceConfig[resourceName]
-	if !ok {
-		p.log.Error(fmt.Errorf("failed to find resource configuration"), "resourceName", resourceName)
-	}
-	// Reset IPv4 resource warmpool config to default values
+	// Set the secondary IP provider pool state to active
 	job := resourceProviderAndPool.resourcePool.SetToActive(ipv4ResourceConfig.WarmPoolConfig)
 	p.SubmitAsyncJob(job)
 
@@ -240,7 +246,7 @@ func (p *ipv4Provider) CreatePrivateIPv4AndUpdatePool(job *worker.WarmPoolJob) {
 		p.log.Error(err, "failed to create all/some of the IPv4 addresses", "created ips", ips)
 		didSucceed = false
 	}
-	job.Resources = ips
+	job.Resources = convertIPsToResourceGroupMap(ips)
 	p.updatePoolAndReconcileIfRequired(instanceResource.resourcePool, job, didSucceed)
 }
 
@@ -252,13 +258,14 @@ func (p *ipv4Provider) ReSyncPool(job *worker.WarmPoolJob) {
 		return
 	}
 
-	resources, err := providerAndPool.eniManager.InitResources(p.apiWrapper.EC2API)
+	ips, _, err := providerAndPool.eniManager.InitResources(p.apiWrapper.EC2API)
 	if err != nil {
 		p.log.Error(err, "failed to get init resources for the node",
 			"name", job.NodeName)
 		return
 	}
 
+	resources := convertIPsToResourceGroupMap(ips)
 	providerAndPool.resourcePool.ReSync(resources)
 }
 
@@ -269,13 +276,20 @@ func (p *ipv4Provider) DeletePrivateIPv4AndUpdatePool(job *worker.WarmPoolJob) {
 		p.log.Error(fmt.Errorf("cannot find the instance provider and pool form the cache"), "node", job.NodeName)
 		return
 	}
+
+	// Collect list of IPs to delete
+	var ipsToDelete []string
+	for _, resourceIDs := range job.Resources {
+		ipsToDelete = append(ipsToDelete, resourceIDs...)
+	}
+
 	didSucceed := true
-	failedIPs, err := instanceResource.eniManager.DeleteIPV4Address(job.Resources, p.apiWrapper.EC2API, p.log)
+	failedIPs, err := instanceResource.eniManager.DeleteIPV4Address(ipsToDelete, p.apiWrapper.EC2API, p.log)
 	if err != nil {
 		p.log.Error(err, "failed to delete all/some of the IPv4 addresses", "failed ips", failedIPs)
 		didSucceed = false
 	}
-	job.Resources = failedIPs
+	job.Resources = convertIPsToResourceGroupMap(failedIPs)
 	p.updatePoolAndReconcileIfRequired(instanceResource.resourcePool, job, didSucceed)
 }
 
@@ -339,17 +353,6 @@ func getCapacity(instanceType string, instanceOs string) int {
 	return capacity
 }
 
-// difference returns the difference between the slice and the map in the argument
-func difference(allIPs []string, usedIPSet map[string]struct{}) []string {
-	var notUsed []string
-	for _, ip := range allIPs {
-		if _, found := usedIPSet[ip]; !found {
-			notUsed = append(notUsed, ip)
-		}
-	}
-	return notUsed
-}
-
 // GetPool returns the warm pool for the IPv4 resources
 func (p *ipv4Provider) GetPool(nodeName string) (pool.Pool, bool) {
 	providerAndPool, exists := p.getInstanceProviderAndPool(nodeName)
@@ -387,4 +390,14 @@ func (p *ipv4Provider) IntrospectNode(nodeName string) interface{} {
 		return struct{}{}
 	}
 	return resource.resourcePool.Introspect()
+}
+
+// convertIPsToResourceGroupMap converts list of IPs to a mapping of resource group ID to a list of resource IDs belonging to that group.
+// In the case of secondary IP provider, both key and value will be the same as secondary IPv4 address
+func convertIPsToResourceGroupMap(ips []string) map[string][]string {
+	resourceGroupMap := map[string][]string{}
+	for _, ip := range ips {
+		resourceGroupMap[ip] = append(resourceGroupMap[ip], ip)
+	}
+	return resourceGroupMap
 }
