@@ -13,7 +13,10 @@
 
 package worker
 
-import "k8s.io/apimachinery/pkg/types"
+import (
+	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/utils"
+	"k8s.io/apimachinery/pkg/types"
+)
 
 // Operations are the supported operations for on demand resource handler
 type Operations string
@@ -100,7 +103,7 @@ type WarmPoolJob struct {
 	// Operation is the type of operation on warm pool
 	Operations Operations
 	// Resources can hold the resource to delete or the created resources
-	Resources []string
+	Resources map[string][]string
 	// ResourceCount is the number of resource to be created
 	ResourceCount int
 	// NodeName is the name of the node
@@ -124,12 +127,12 @@ func NewWarmPoolReSyncJob(nodeName string) *WarmPoolJob {
 	}
 }
 
-func NewWarmPoolDeleteJob(nodeName string, resourcesToDelete []string) *WarmPoolJob {
+func NewWarmPoolDeleteJob(nodeName string, resourcesToDelete map[string][]string) *WarmPoolJob {
 	return &WarmPoolJob{
 		Operations:    OperationDeleted,
 		NodeName:      nodeName,
 		Resources:     resourcesToDelete,
-		ResourceCount: len(resourcesToDelete),
+		ResourceCount: utils.CountNumValues(resourcesToDelete),
 	}
 }
 

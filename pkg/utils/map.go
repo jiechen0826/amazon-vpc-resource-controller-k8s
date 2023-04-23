@@ -20,3 +20,11 @@ func CopyMap(original map[string]string) map[string]string {
 	}
 	return copy
 }
+
+func CountNumValues(original map[string][]string) int {
+	count := 0
+	for _, values := range original {
+		count += len(values)
+	}
+	return count
+}

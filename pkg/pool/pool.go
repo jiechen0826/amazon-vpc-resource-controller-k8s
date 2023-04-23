@@ -21,7 +21,6 @@ import (
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/config"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/utils"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/worker"
-
 	"github.com/go-logr/logr"
 )
 
@@ -40,12 +39,13 @@ type Pool interface {
 	FreeResource(requesterID string, resourceID string) (shouldReconcile bool, err error)
 	GetAssignedResource(requesterID string) (resourceID string, ownsResource bool)
 	UpdatePool(job *worker.WarmPoolJob, didSucceed bool) (shouldReconcile bool)
-	ReSync(resources []string)
+	ReSync(resources map[string][]string)
 	ReconcilePool() *worker.WarmPoolJob
 	ProcessCoolDownQueue() bool
 	SetToDraining() *worker.WarmPoolJob
 	SetToActive(warmPoolConfig *config.WarmPoolConfig) *worker.WarmPoolJob
 	Introspect() IntrospectResponse
+	IsIPManaged(resourceID string) bool
 }
 
 type pool struct {
@@ -59,8 +59,10 @@ type pool struct {
 	lock sync.RWMutex // following resources are guarded by the lock
 	// usedResources is the key value pair of the owner id to the resource id
 	usedResources map[string]string
-	// warmResources is the list of free resources available to be allocated to the pods
-	warmResources []string
+	// usedResourceToGroupMap is the key value pair of the used resource id to its group id
+	usedResourceToGroupMap map[string]string
+	// warmResources is the map of group id to a list of free resources available to be allocated to the pods
+	warmResources map[string][]string
 	// coolDownQueue is the resources that sit in the queue for the cool down period
 	coolDownQueue []CoolDownResource
 	// pendingCreate represents the number of resources being created asynchronously
@@ -77,26 +79,29 @@ type pool struct {
 type CoolDownResource struct {
 	// ResourceID is the unique ID of the resource
 	ResourceID string
+	GroupID    string
 	// DeletionTimestamp is the time when the owner of the resource was deleted
 	DeletionTimestamp time.Time
 }
 
 // IntrospectResponse is the pool state returned to the introspect API
 type IntrospectResponse struct {
-	UsedResources    map[string]string
-	WarmResources    []string
-	CoolingResources []CoolDownResource
+	UsedResources          map[string]string
+	usedResourceToGroupMap map[string]string
+	WarmResources          map[string][]string
+	CoolingResources       []CoolDownResource
 }
 
 func NewResourcePool(log logr.Logger, poolConfig *config.WarmPoolConfig, usedResources map[string]string,
-	warmResources []string, nodeName string, capacity int) Pool {
+	usedResourceToGroupMap map[string]string, warmResources map[string][]string, nodeName string, capacity int) Pool {
 	pool := &pool{
-		log:            log,
-		warmPoolConfig: poolConfig,
-		usedResources:  usedResources,
-		warmResources:  warmResources,
-		capacity:       capacity,
-		nodeName:       nodeName,
+		log:                    log,
+		warmPoolConfig:         poolConfig,
+		usedResources:          usedResources,
+		usedResourceToGroupMap: usedResourceToGroupMap,
+		warmResources:          warmResources,
+		capacity:               capacity,
+		nodeName:               nodeName,
 	}
 	return pool
 }
@@ -106,7 +111,7 @@ func NewResourcePool(log logr.Logger, poolConfig *config.WarmPoolConfig, usedRes
 // upstream has additional resources which are not present locally, these resources are added
 // to the warm pool. During ReSync all Create/Delete operations on the Pool should be halted
 // but Assign/Free on the Pool can be allowed.
-func (p *pool) ReSync(upstreamResource []string) {
+func (p *pool) ReSync(upstreamResource map[string][]string) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -117,46 +122,69 @@ func (p *pool) ReSync(upstreamResource []string) {
 	}
 	p.reSyncRequired = false
 
-	// Get the list of local resources
-	var localResources []string
-	for _, resource := range p.coolDownQueue {
-		localResources = append(localResources, resource.ResourceID)
+	// Get the list of local resources, indexed by resource group id
+	localResourceGroups := make(map[string][]string)
+	for groupID, resourceIDs := range p.warmResources {
+		localResourceGroups[groupID] = resourceIDs
 	}
-	_, usedResources := utils.GetKeyValSlice(p.usedResources)
-	localResources = append(localResources, usedResources...)
-	localResources = append(localResources, p.warmResources...)
+	for _, resource := range p.coolDownQueue {
+		localResourceGroups[resource.GroupID] = append(localResourceGroups[resource.GroupID], resource.ResourceID)
+	}
+	for resourceID, groupID := range p.usedResourceToGroupMap {
+		localResourceGroups[groupID] = append(localResourceGroups[groupID], resourceID)
+	}
 
-	// resources that are present upstream but missing in the pool
-	newResources := utils.Difference(upstreamResource, localResources)
-	// resources that are deleted from upstream but still present in the pool
-	deletedResources := utils.Difference(localResources, upstreamResource)
+	// Resources that are present upstream but missing in the pool
+	newResources := make(map[string][]string)
+	for groupID, upstreamRes := range upstreamResource {
+		if localRes, ok := localResourceGroups[groupID]; !ok {
+			// group id not found in local
+			newResources[groupID] = append(newResources[groupID], upstreamRes...)
+		} else {
+			// group id exists in local, finding difference in resource ids
+			diffResourceIDs := utils.Difference(upstreamRes, localRes)
+			if diffResourceIDs != nil && len(diffResourceIDs) > 0 {
+				newResources[groupID] = append(newResources[groupID], diffResourceIDs...)
+			}
+		}
+	}
 
-	if len(newResources) == 0 && len(deletedResources) == 0 {
-		p.log.Info("local and upstream state is in sync")
-		return
+	// Resources that are deleted from upstream but still present in the pool
+	deletedResources := make(map[string][]string)
+	for groupID, localRes := range localResourceGroups {
+		if upstreamRes, ok := upstreamResource[groupID]; !ok {
+			// group id not found in upstream
+			deletedResources[groupID] = append(deletedResources[groupID], localRes...)
+		} else {
+			// group id exists in upstream, finding difference in resource ids
+			diffResourceIDs := utils.Difference(localRes, upstreamRes)
+			if diffResourceIDs != nil && len(diffResourceIDs) > 0 {
+				deletedResources[groupID] = append(deletedResources[groupID], diffResourceIDs...)
+			}
+		}
 	}
 
 	if len(newResources) > 0 {
 		p.log.Info("adding new resources to warm pool", "resource", newResources)
-		p.warmResources = append(p.warmResources, newResources...)
+		for groupID, groupRes := range newResources {
+			p.warmResources[groupID] = append(p.warmResources[groupID], groupRes...)
+		}
 	}
 
 	if len(deletedResources) > 0 {
 		p.log.Info("attempting to remove deleted resources",
 			"deleted resources", deletedResources)
 
-		for _, deletedResource := range deletedResources {
-			for i := len(p.warmResources) - 1; i >= 0; i-- {
-				if p.warmResources[i] == deletedResource {
-					p.log.Info("removing resource from warm pool",
-						"resource id", deletedResource)
-					p.warmResources = append(p.warmResources[:i], p.warmResources[i+1:]...)
-				}
-			}
+		for groupID, deletedResourceIDs := range deletedResources {
+			p.log.Info("removing resource from warm pool", "group ID",
+				groupID, "resource IDs", deletedResourceIDs)
+			p.warmResources[groupID] = utils.Difference(p.warmResources[groupID], deletedResourceIDs)
+
 			for i := len(p.coolDownQueue) - 1; i >= 0; i-- {
-				if p.coolDownQueue[i].ResourceID == deletedResource {
+				coolDownResource := p.coolDownQueue[i]
+				if coolDownResource.GroupID == groupID && utils.Include(coolDownResource.ResourceID, deletedResourceIDs) {
 					p.log.Info("removing resource from cool down queue",
-						"resource id", deletedResource)
+						"group ID", groupID, "resource ID", p.coolDownQueue[i].ResourceID)
 					p.coolDownQueue = append(p.coolDownQueue[:i], p.coolDownQueue[i+1:]...)
 				}
 			}
@@ -195,11 +223,17 @@ func (p *pool) AssignResource(requesterID string) (resourceID string, shouldReco
 	}
 
 	// Allocate the resource
-	resourceID = p.warmResources[0]
-	p.warmResources = p.warmResources[1:]
+	groupID, count := findGroupWithLeastElements(p.warmResources)
+	if count <= 0 || groupID == "" {
+		return "", true, ErrWarmPoolEmpty
+	}
+	resources := p.warmResources[groupID]
+	resourceID = resources[0]
+	p.warmResources[groupID] = resources[1:]
 
 	// Add the resource in the used resource key-value pair
 	p.usedResources[requesterID] = resourceID
+	p.usedResourceToGroupMap[resourceID] = groupID
 
 	p.log.V(1).Info("assigned resource",
 		"resource id", resourceID, "requester id", requesterID)
@@ -227,12 +261,16 @@ func (p *pool) FreeResource(requesterID string, resourceID string) (shouldReconc
 	if actualResourceID != resourceID {
 		return false, ErrIncorrectResourceOwner
 	}
-
+	groupID, ok := p.usedResourceToGroupMap[actualResourceID]
+	if !ok {
+		return false, ErrResourceDoesntExist
+	}
 	delete(p.usedResources, requesterID)
 
 	// Put the resource in cool down queue
 	resource := CoolDownResource{
 		ResourceID:        actualResourceID,
+		GroupID:           groupID,
 		DeletionTimestamp: time.Now(),
 	}
 	p.coolDownQueue = append(p.coolDownQueue, resource)
@@ -259,8 +297,8 @@ func (p *pool) UpdatePool(job *worker.WarmPoolJob, didSucceed bool) (shouldRecon
 
 	if job.Resources != nil && len(job.Resources) > 0 {
 		// Add the resources to the warm pool
-		for _, resource := range job.Resources {
-			p.warmResources = append(p.warmResources, resource)
+		for groupID, resources := range job.Resources {
+			p.warmResources[groupID] = append(p.warmResources[groupID], resources...)
 		}
 		log.Info("added resource to the warm pool", "resources", job.Resources)
 	}
@@ -288,9 +326,9 @@ func (p *pool) ProcessCoolDownQueue() (needFurtherProcessing bool) {
 
 	for index, resource := range p.coolDownQueue {
 		if time.Since(resource.DeletionTimestamp) >= config.CoolDownPeriod {
-			// Add back to the cool down queue
-			p.warmResources = append(p.warmResources, resource.ResourceID)
-			p.log.Info("moving the resource from delete to cool down queue",
+			delete(p.usedResourceToGroupMap, resource.ResourceID)
+			p.warmResources[resource.GroupID] = append(p.warmResources[resource.GroupID], resource.ResourceID)
+			p.log.Info("moving the deleted resource from cool down queue to warm pool",
 				"resource id", resource.ResourceID, "deletion time", resource.DeletionTimestamp)
 		} else {
 			// Remove the items from cool down queue that are processed and return
@@ -305,17 +343,17 @@ func (p *pool) ProcessCoolDownQueue() (needFurtherProcessing bool) {
 	return false
 }
 
-// reconcilePoolIfRequired reconciles the Warm pool to make it reach it's desired state by submitting either create or delete
+// ReconcilePool reconciles the warm pool to make it reach its desired state by submitting either create or delete
 // request to the warm pool
 func (p *pool) ReconcilePool() *worker.WarmPoolJob {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	// Total created resources includes all the resources for the instance that are not yet deleted
-	totalCreatedResources := len(p.warmResources) + len(p.usedResources) + len(p.coolDownQueue) +
+	numWarmResources := utils.CountNumValues(p.warmResources)
+	totalCreatedResources := numWarmResources + len(p.usedResources) + len(p.coolDownQueue) +
 		p.pendingCreate + p.pendingDelete
-
-	log := p.log.WithValues("resync", p.reSyncRequired, "warm", len(p.warmResources), "used",
+	log := p.log.WithValues("resync", p.reSyncRequired, "warm", numWarmResources, "used",
 		len(p.usedResources), "pending create", p.pendingCreate, "pending delete", &p.pendingDelete,
 		"cool down queue", len(p.coolDownQueue), "total resources", totalCreatedResources,
 		"max capacity", p.capacity, "desired size", p.warmPoolConfig.DesiredSize)
@@ -339,7 +377,7 @@ func (p *pool) ReconcilePool() *worker.WarmPoolJob {
 	}
 
 	// Consider pending create as well so we don't create multiple subsequent create request
-	deviation := p.warmPoolConfig.DesiredSize - (len(p.warmResources) + p.pendingCreate)
+	deviation := p.warmPoolConfig.DesiredSize - (numWarmResources + p.pendingCreate)
 
 	// Need to create more resources for warm pool
 	if deviation > p.warmPoolConfig.MaxDeviation {
@@ -367,13 +405,31 @@ func (p *pool) ReconcilePool() *worker.WarmPoolJob {
 	} else if -deviation > p.warmPoolConfig.MaxDeviation {
 		// Need to delete from warm pool
 		deviation = -deviation
-		var resourceToDelete []string
-		for i := len(p.warmResources) - 1; i >= len(p.warmResources)-deviation; i-- {
-			resourceToDelete = append(resourceToDelete, p.warmResources[i])
+		resourceToDelete := make(map[string][]string)
+
+		numToDelete := deviation
+		for numToDelete > 0 {
+			groupID, resourceCount := findGroupWithLeastElements(p.warmResources)
+			log.Info("found group with minimum number of resources", "group id", groupID, "resourceCount", resourceCount)
+
+			// Remove resources to be deleted form the warm pool
+			if numToDelete == resourceCount {
+				resourceToDelete[groupID] = append(resourceToDelete[groupID], p.warmResources[groupID]...)
+				delete(p.warmResources, groupID)
+				numToDelete -= resourceCount
+			} else if numToDelete < resourceCount {
+				resources := p.warmResources[groupID]
+				toDelete := resources[len(resources)-numToDelete:]
+				resourceToDelete[groupID] = append(resourceToDelete[groupID], toDelete...)
+				p.warmResources[groupID] = resources[:len(resources)-numToDelete]
+				numToDelete -= numToDelete
+			} else {
+				resourceToDelete[groupID] = append(resourceToDelete[groupID], p.warmResources[groupID]...)
+				delete(p.warmResources, groupID)
+				numToDelete -= resourceCount
+			}
 		}
 
-		// Remove resources to be deleted form the warm pool
-		p.warmResources = p.warmResources[:len(p.warmResources)-deviation]
 		// Increment pending to the number of resource being deleted, once successfully deleted the count can be decremented
 		p.pendingDelete += deviation
 		// Submit the job to delete resources
@@ -413,8 +469,32 @@ func (p *pool) Introspect() IntrospectResponse {
 	}
 
 	return IntrospectResponse{
-		UsedResources:    usedResources,
-		WarmResources:    p.warmResources,
-		CoolingResources: p.coolDownQueue,
+		UsedResources:          usedResources,
+		usedResourceToGroupMap: p.usedResourceToGroupMap,
+		WarmResources:          p.warmResources,
+		CoolingResources:       p.coolDownQueue,
 	}
+}
+
+// IsIPManaged checks if the IPv4 address is managed by the handler
+func (p *pool) IsIPManaged(resourceID string) bool {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+
+	if _, ok := p.usedResourceToGroupMap[resourceID]; ok {
+		return true
+	}
+	return false
+}
+
+func findGroupWithLeastElements(resourceGroups map[string][]string) (string, int) {
+	minCount := 16
+	group := ""
+	for groupID, resources := range resourceGroups {
+		if len(resources) <= minCount && len(resources) > 0 {
+			minCount = len(resources)
+			group = groupID
+		}
+	}
+	return group, minCount
 }
