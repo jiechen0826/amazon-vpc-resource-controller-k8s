@@ -39,6 +39,9 @@ type ConfigMapReconciler struct {
 	Condition                         condition.Conditions
 	curWinIPAMEnabledCond             bool
 	curWinPrefixDelegationEnabledCond bool
+	curWinPDWarmIPTarget              int
+	curWinPDMinIPTarget               int
+	curWinPDWarmPrefixTarget          int
 }
 
 //+kubebuilder:rbac:groups=core,resources=configmaps,namespace=kube-system,resourceNames=amazon-vpc-cni,verbs=get;list;watch
@@ -65,7 +68,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Check if the flag value has changed
+	// Check if the Windows IPAM flag has changed
 	newWinIPAMEnabledCond := r.Condition.IsWindowsIPAMEnabled()
 
 	var isIPAMFlagUpdated bool
@@ -87,8 +90,21 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		isPrefixFlagUpdated = true
 	}
 
+	// Check if configurations for Windows prefix delegation have changed
+	var isPDConfigUpdated bool
+	warmIPTarget, minIPTarget, warmPrefixTarget := config.ParseWinPDConfigsFromConfigMap(configmap)
+	if r.curWinPDWarmIPTarget != warmIPTarget || r.curWinPDMinIPTarget != minIPTarget || r.curWinPDWarmPrefixTarget != warmPrefixTarget {
+		r.curWinPDWarmIPTarget = warmIPTarget
+		r.curWinPDMinIPTarget = minIPTarget
+		r.curWinPDWarmPrefixTarget = warmPrefixTarget
+		logger.Info("updated PD configs from configmap", config.WarmIPTarget, r.curWinPDWarmIPTarget,
+			config.MinimumIPTarget, r.curWinPDMinIPTarget, config.WarmPrefixTarget, r.curWinPDWarmPrefixTarget)
+
+		isPDConfigUpdated = true
+	}
+
 	// Flag is updated, update all nodes
-	if isIPAMFlagUpdated || isPrefixFlagUpdated {
+	if isIPAMFlagUpdated || isPrefixFlagUpdated || isPDConfigUpdated {
 		err := UpdateNodesOnConfigMapChanges(r.K8sAPI, r.NodeManager)
 		if err != nil {
 			// Error in updating nodes

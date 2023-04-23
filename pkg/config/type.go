@@ -26,7 +26,8 @@ const (
 	// ResourceNamePodENI is the extended resource name for Branch ENIs
 	ResourceNamePodENI = VPCResourcePrefix + "pod-eni"
 	// ResourceNameIPAddress is the extended resource name for private IP addresses
-	ResourceNameIPAddress = VPCResourcePrefix + "PrivateIPv4Address"
+	ResourceNameIPAddress           = VPCResourcePrefix + "PrivateIPv4Address"
+	ResourceNameIPAddressFromPrefix = VPCResourcePrefix + "PrivateIPv4AddressFromPrefix"
 )
 
 // K8s Labels
@@ -71,6 +72,9 @@ const (
 	VpcCniConfigMapName              = "amazon-vpc-cni"
 	EnableWindowsIPAMKey             = "enable-windows-ipam"
 	EnableWindowsPrefixDelegationKey = "enable-windows-prefix-delegation"
+	WarmPrefixTarget                 = "warm-prefix-target"
+	WarmIPTarget                     = "warm-ip-target"
+	MinimumIPTarget                  = "minimum-ip-target"
 	// Since LeaderElectionNamespace and VpcCniConfigMapName may be different in the future
 	KubeSystemNamespace            = "kube-system"
 	VpcCNIDaemonSetName            = "aws-node"
@@ -121,5 +125,7 @@ type WarmPoolConfig struct {
 	// Number of resources not to use in the warm pool
 	ReservedSize int
 	// The maximum number by which the warm pool can deviate from the desired size
-	MaxDeviation int
+	MaxDeviation     int
+	WarmPrefixTarget int
+	MinIPTarget      int
 }
