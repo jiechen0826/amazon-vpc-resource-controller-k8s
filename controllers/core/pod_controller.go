@@ -15,15 +15,16 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/aws/amazon-vpc-resource-controller-k8s/controllers/custom"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/condition"
+	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/config"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/k8s"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/k8s/pod"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/node/manager"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/resource"
-
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -124,6 +125,33 @@ func (r *PodReconciler) Reconcile(request custom.Request) (ctrl.Result, error) {
 	// For each resource, if a handler can allocate/de-allocate a resource then delegate the
 	// allocation/de-allocation task to the respective handler
 	for resourceName, totalCount := range aggregateResources {
+		// For the same resource name, there are two resource providers: secondary IP provider, and prefix provider
+		if resourceName == config.ResourceNameIPAddress {
+			// Pod deletion must use the handler that assigned the IP regardless which mode is enabled
+			if isDeleteEvent || hasPodCompleted || nodeDeletedInCluster {
+				resourceID, present := pod.Annotations[resourceName]
+				if !present {
+					logger.V(1).Error(fmt.Errorf("resource ID was not found in annotation"),
+						"resource", resourceName, "is delete event", isDeleteEvent, "hasPodCompleted", hasPodCompleted,
+						"nodeDeletedInCluster", nodeDeletedInCluster)
+					continue
+				}
+				// Check prefix provider to see if it's a prefix deconstructed IP
+				providerMap := r.ResourceManager.GetResourceProviders()
+				prefixProvider := providerMap[config.ResourceNameIPAddressFromPrefix]
+				resourcePool, ok := prefixProvider.GetPool(pod.Spec.NodeName)
+				// If IP is managed by prefix pool, update resource name accordingly so that prefix handler will be used
+				if ok && resourcePool.IsIPManaged(resourceID) {
+					resourceName = config.ResourceNameIPAddressFromPrefix
+				}
+			} else if r.Condition.IsWindowsPrefixDelegationEnabled() {
+				// TODO should check for Nitro instance here?
+				// Pod creation should use the currently active resource handler.
+				// If prefix delegation is enabled, then update resource name so that prefix handler will be used
+				resourceName = config.ResourceNameIPAddressFromPrefix
+			}
+		}
+
 		resourceHandler, isSupported := r.ResourceManager.GetResourceHandler(resourceName)
 		if !isSupported {
 			continue

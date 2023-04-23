@@ -393,8 +393,10 @@ func isWindowsNode(node *v1.Node) bool {
 
 // canAttachTrunk returns true if the node has capability to attach a Trunk ENI
 func canAttachTrunk(node *v1.Node) bool {
-	_, ok := node.Labels[config.HasTrunkAttachedLabel]
-	return ok
+	val, ok := node.Labels[config.HasTrunkAttachedLabel]
+	//return ok
+	// TODO: looks like a bug but double check if this affects Trunk functionality
+	return ok && val != "not-supported"
 }
 
 func (m *manager) removeNodeSafe(nodeName string) {
