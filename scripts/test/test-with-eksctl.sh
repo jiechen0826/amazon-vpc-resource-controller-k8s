@@ -297,7 +297,7 @@ redirect_vpc_controller_logs &
 disable_eks_controller
 
 # Verify the Controller on Data Plane has the leader lease
-verify_controller_has_lease
+#verify_controller_has_lease
 
 # Enables the SGP feature on IPAMD, which lables the node
 # with a fetaure flag used by controller to start managing

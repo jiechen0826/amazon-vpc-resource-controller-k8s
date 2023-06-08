@@ -10,7 +10,7 @@ spec:
   selector:
     matchLabels:
       control-plane: controller
-  replicas: 2
+  replicas: 1
   template:
     metadata:
       labels:
@@ -24,9 +24,11 @@ spec:
         args:
           - --cluster-name=CLUSTER_NAME
           - --role-arn=USER_ROLE_ARN
-          - --enable-leader-election
+          - --enable-leader-election=false
           - --metrics-addr=:8443
+          - --enable-windows-prefix-delegation=true
         image: controller:latest
+        imagePullPolicy: Always
         name: controller
         resources:
           limits:
